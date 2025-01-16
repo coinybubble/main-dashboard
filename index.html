@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Coiny Bubble Dashboard</title>
+  <!-- Vue 3 (Production) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <!-- Top Row -->
+  <div class="top-row">
+    <!-- Global Trend -->
+    <div class="card">
+      <div class="title">
+        <span>Global Trend</span>
+        <div class="ws-status">
+          <div :class="['status-dot', {
+            'status-connected': wsStatus === 'connected' && !isDataStale,
+            'status-disconnected': wsStatus === 'disconnected' || isDataStale
+          }]"></div>
+        </div>
+      </div>
+
+      <!-- 2-minute white slider -->
+      <div class="range-slider-2min">
+        <div class="range-labels-2min">
+          <span>{{ formatNumber(minPrice2Min, 'price') }}</span>
+          <span>{{ formatNumber(maxPrice2Min, 'price') }}</span>
+        </div>
+        <div class="range-track-2min">
+          <!-- 10s colored segment (green or red) -->
+          <div
+            class="range-10s-2min"
+            :style="[ slider10SecStyle2Min, { backgroundColor: tenSecTrendColor } ]"
+          ></div>
+          <!-- White marker for the current price -->
+          <div class="current-price-marker" :style="currentPriceMarkerStyle"></div>
+        </div>
+      </div>
+
+      <!-- Current price + difference vs. VWAP(30s) -->
+      <div class="current-price-container">
+        <div class="current-price" :class="price2MinDiff30Sec >= 0 ? 'bull' : 'bear'">
+          ${{ formatNumber(price2Min, 'price') }}
+          <span class="price-diff">
+            ({{ signOf(price2MinDiff30Sec) }}{{ formatNumber(Math.abs(price2MinDiff30Sec), 'diff') }}%)
+          </span>
+        </div>
+      </div>
+
+      <!-- Speedometer (trade count in the last 10 seconds) -->
+      <div class="speedometer">
+        <svg viewBox="0 0 200 100" class="speedometer-arc">
+          <defs>
+            <linearGradient id="arcGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="var(--bear)" />
+              <stop offset="100%" stop-color="var(--bull)" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M 20 100 A 80 80 0 0 1 180 100"
+            fill="none"
+            stroke="url(#arcGradient)"
+            stroke-width="15"
+          />
+        </svg>
+        <div class="speedometer-arrow" :style="speedometerArrowStyle"></div>
+      </div>
+      <div class="speedometer-value">
+        {{ last10SecTradesCount }} trades (10s)
+      </div>
+    </div>
+
+    <!-- 30-second block -->
+    <div class="card">
+      <div class="title">
+        <span>Volume Balance Last 30s</span>
+        <span class="status-percent" v-if="timeFrameCompleteness && timeFrameCompleteness.thirty < 100">
+          ({{ Math.floor(timeFrameCompleteness.thirty) }}%)
+        </span>
+      </div>
+      <div class="price-info">
+        <div class="main-price">Avg: ${{ formatNumber(price30Sec, 'price') }}</div>
+        <div class="vwap">VWAP: ${{ formatNumber(vwap30Sec, 'price') }}</div>
+        <div class="range">Min: ${{ formatNumber(minPrice30Sec, 'price') }} / Max: ${{ formatNumber(maxPrice30Sec, 'price') }}</div>
+      </div>
+      <div class="volume-bar">
+        <div class="bar-fill" :style="{ width: buyPercent30Sec + '%' }"></div>
+        <div class="bar-text">{{ formatNumber(buyPercent30Sec) }}% Buy</div>
+      </div>
+      <div class="volume-stats">
+        <div class="stat-item">
+          <div class="value bull">{{ formatNumber(buyVol30Sec, 'volume') }}</div>
+          <div class="label">Buy Vol</div>
+        </div>
+        <div class="volume-diff">
+          <div :class="['value', buyVol30Sec > sellVol30Sec ? 'bull' : 'bear']">
+            {{ formatNumber(volumeDiff30Sec.value, 'volume') }}
+            <span class="diff-arrow">{{ volumeDiff30Sec.sign > 0 ? '↑' : '↓' }}</span>
+          </div>
+          <div class="label">Diff</div>
+        </div>
+        <div class="stat-item">
+          <div class="value bear">{{ formatNumber(sellVol30Sec, 'volume') }}</div>
+          <div class="label">Sell Vol</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2-minute block -->
+    <div class="card">
+      <div class="title">
+        <span>Volume Balance Last 2m</span>
+        <span class="status-percent" v-if="timeFrameCompleteness && timeFrameCompleteness.twoMin < 100">
+          ({{ Math.floor(timeFrameCompleteness.twoMin) }}%)
+        </span>
+      </div>
+      <div class="price-info">
+        <div class="main-price">Avg: ${{ formatNumber(price2Min, 'price') }}</div>
+        <div class="vwap">VWAP: ${{ formatNumber(vwap2Min, 'price') }}</div>
+        <div class="range">Min: ${{ formatNumber(minPrice2Min, 'price') }} / Max: ${{ formatNumber(maxPrice2Min, 'price') }}</div>
+      </div>
+      <div class="volume-bar">
+        <div class="bar-fill" :style="{ width: buyPercent2Min + '%' }"></div>
+        <div class="bar-text">{{ formatNumber(buyPercent2Min) }}% Buy</div>
+      </div>
+      <div class="volume-stats">
+        <div class="stat-item">
+          <div class="value bull">{{ formatNumber(buyVol2Min, 'volume') }}</div>
+          <div class="label">Buy Vol</div>
+        </div>
+        <div class="volume-diff">
+          <div :class="['value', buyVol2Min > sellVol2Min ? 'bull' : 'bear']">
+            {{ formatNumber(volumeDiff2Min.value, 'volume') }}
+            <span class="diff-arrow">{{ volumeDiff2Min.sign > 0 ? '↑' : '↓' }}</span>
+          </div>
+          <div class="label">Diff</div>
+        </div>
+        <div class="stat-item">
+          <div class="value bear">{{ formatNumber(sellVol2Min, 'volume') }}</div>
+          <div class="label">Sell Vol</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5-minute block -->
+    <div class="card">
+      <div class="title">
+        <span>Volume Balance Last 5m</span>
+        <span class="status-percent" v-if="timeFrameCompleteness && timeFrameCompleteness.fiveMin < 100">
+          ({{ Math.floor(timeFrameCompleteness.fiveMin) }}%)
+        </span>
+      </div>
+      <div class="price-info">
+        <div class="main-price">Avg: ${{ formatNumber(price5Min, 'price') }}</div>
+        <div class="vwap">VWAP: ${{ formatNumber(vwap5Min, 'price') }}</div>
+        <div class="range">Min: ${{ formatNumber(minPrice5Min, 'price') }} / Max: ${{ formatNumber(maxPrice5Min, 'price') }}</div>
+      </div>
+      <div class="volume-bar">
+        <div class="bar-fill" :style="{ width: buyPercent5Min + '%' }"></div>
+        <div class="bar-text">{{ formatNumber(buyPercent5Min) }}% Buy</div>
+      </div>
+      <div class="volume-stats">
+        <div class="stat-item">
+          <div class="value bull">{{ formatNumber(buyVol5Min, 'volume') }}</div>
+          <div class="label">Buy Vol</div>
+        </div>
+        <div class="volume-diff">
+          <div :class="['value', buyVol5Min > sellVol5Min ? 'bull' : 'bear']">
+            {{ formatNumber(volumeDiff5Min.value, 'volume') }}
+            <span class="diff-arrow">{{ volumeDiff5Min.sign > 0 ? '↑' : '↓' }}</span>
+          </div>
+          <div class="label">Diff</div>
+        </div>
+        <div class="stat-item">
+          <div class="value bear">{{ formatNumber(sellVol5Min, 'volume') }}</div>
+          <div class="label">Sell Vol</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Row -->
+  <div class="bottom-row">
+    <!-- Exchanges -->
+    <div class="card exchanges-card">
+      <div class="exchange-header">
+        <div class="exchange-name">Exchange</div>
+        <div class="exchange-volume">Volume</div>
+        <div class="exchange-price">Price</div>
+        <div class="timeframes">
+          <div>30s</div>
+          <div>2m</div>
+          <div>5m</div>
+        </div>
+      </div>
+      <div class="exchanges-list">
+        <div v-for="ex in sortedExchanges5Min" :key="ex.name" class="exchange-row">
+          <div class="exchange-name">{{ ex.name.toUpperCase() }}</div>
+          <div class="exchange-volume">{{ formatNumber(ex.totalVol, 'volume') }}</div>
+          <div class="exchange-price">
+            ${{ formatNumber(ex.price, 'price') }}
+            <span :class="ex.diff > 0 ? 'bull' : 'bear'">
+              ({{ formatDiff(ex.diff) }})
+            </span>
+          </div>
+          <div class="timeframes">
+            <!-- 30s -->
+            <div class="timeframe-cell">
+              <div class="bar-background">
+                <div class="bar-fill"
+                     :style="{ width: exComputed(ex.name, 30).buyPercent + '%' }"
+                     :class="exComputed(ex.name, 30).buyPercent > 50 ? 'bull-bg' : 'bear-bg'">
+                </div>
+              </div>
+              <span class="percent-value">{{ formatNumber(exComputed(ex.name, 30).buyPercent) }}%</span>
+            </div>
+
+            <!-- 2m -->
+            <div class="timeframe-cell">
+              <div class="bar-background">
+                <div class="bar-fill"
+                     :style="{ width: exComputed(ex.name, 120).buyPercent + '%' }"
+                     :class="exComputed(ex.name, 120).buyPercent > 50 ? 'bull-bg' : 'bear-bg'">
+                </div>
+              </div>
+              <span class="percent-value">{{ formatNumber(exComputed(ex.name, 120).buyPercent) }}%</span>
+            </div>
+
+            <!-- 5m -->
+            <div class="timeframe-cell">
+              <div class="bar-background">
+                <div class="bar-fill"
+                     :style="{ width: exComputed(ex.name, 300).buyPercent + '%' }"
+                     :class="exComputed(ex.name, 300).buyPercent > 50 ? 'bull-bg' : 'bear-bg'">
+                </div>
+              </div>
+              <span class="percent-value">{{ formatNumber(exComputed(ex.name, 300).buyPercent) }}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trades -->
+    <div class="card trades-card">
+      <div class="trades-cols-container">
+        <!-- Buy trades column -->
+        <div class="trades-col">
+          <div class="trades-header">
+            <div>Buy Vol</div>
+            <div>Price</div>
+          </div>
+          <div class="trades-list">
+            <div
+              v-for="(trade, idx) in buyTradesLimited"
+              :key="idx"
+              :class="['trade-row', getTradeSize(trade.volume, maxVol5Min)]"
+              :style="dynamicStyle(trade)"
+            >
+              <div>{{ formatNumber(trade.volume, 'volume') }}</div>
+              <div>${{ formatNumber(trade.price, 'price') }}</div>
+              <div
+                class="volume-indicator"
+                :style="{ width: (maxVol5Min ? (trade.volume / maxVol5Min * 100) : 0) + '%' }"
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sell trades column -->
+        <div class="trades-col">
+          <div class="trades-header">
+            <div>Sell Vol</div>
+            <div>Price</div>
+          </div>
+          <div class="trades-list">
+            <div
+              v-for="(trade, idx) in sellTradesLimited"
+              :key="idx"
+              :class="['trade-row', getTradeSize(trade.volume, maxVol5Min)]"
+              :style="dynamicStyle(trade)"
+            >
+              <div>{{ formatNumber(trade.volume, 'volume') }}</div>
+              <div>${{ formatNumber(trade.price, 'price') }}</div>
+              <div
+                class="volume-indicator"
+                :style="{ width: (maxVol5Min ? (trade.volume / maxVol5Min * 100) : 0) + '%' }"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- WebSocket logic -->
+<script src="src/websocket.js"></script>
+<!-- Main logic -->
+<script src="src/main.js"></script>
+</body>
+</html>
