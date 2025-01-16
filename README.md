@@ -18,3 +18,5 @@ This is the main dashboard for **Coiny Bubble**, showing real-time aggregated BT
   - Left column: recent buy trades.
   - Right column: recent sell trades.
   - Dynamic background color intensity based on volume size.
+
+![img.png](img.png)
