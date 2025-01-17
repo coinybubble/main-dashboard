@@ -2,7 +2,7 @@
 window.WebSocketService = class {
   constructor(options = {}) {
     // Use the aggregator endpoint you want:
-    this.url = options.url || 'wss://api.coinybubble.com/ws/btc'
+    this.url = options.url || 'wss://btc.coinybubble.com/ws/btc'
     this.onMessage = options.onMessage || (() => {})
     this.onConnected = options.onConnected || (() => {})
     this.onDisconnected = options.onDisconnected || (() => {})
