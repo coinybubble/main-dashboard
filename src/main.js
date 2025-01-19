@@ -50,6 +50,7 @@ createApp({
           maxPrice: 0
         }
       }
+
       let buyVolSum = 0
       let sellVolSum = 0
       let sumPV = 0
@@ -60,10 +61,16 @@ createApp({
         buyVolSum += snap.buy_volume
         sellVolSum += snap.sell_volume
 
-        sumPV += snap.buy_volume * snap.buy_avg_price
-        sumPV += snap.sell_volume * snap.sell_avg_price
+        // Add to price-volume sum if there are valid prices
+        if (snap.buy_avg_price > 0) {
+          sumPV += snap.buy_volume * snap.buy_avg_price
+        }
+        if (snap.sell_avg_price > 0) {
+          sumPV += snap.sell_volume * snap.sell_avg_price
+        }
         sumV += snap.buy_volume + snap.sell_volume
 
+        // Only add valid prices to candidates
         if (snap.buy_min_price > 0) {
           priceCandidates.push(snap.buy_min_price, snap.buy_max_price)
         }
@@ -85,7 +92,7 @@ createApp({
       }
     }
 
-    // Metrics for 30s, 2m, 5m, 10s
+    // Metrics for different timeframes
     const metrics30Sec = computed(() => aggregateMetrics(recentSnapshots30Sec.value))
     const metrics2Min = computed(() => aggregateMetrics(recentSnapshots2Min.value))
     const metrics5Min = computed(() => aggregateMetrics(recentSnapshots5Min.value))
@@ -125,6 +132,8 @@ createApp({
         sign: Math.sign(diff)
       }
     }
+
+    // Volume differences
     const volumeDiff30Sec = computed(() => calcDiff(buyVol30Sec.value, sellVol30Sec.value))
     const volumeDiff2Min = computed(() => calcDiff(buyVol2Min.value, sellVol2Min.value))
     const volumeDiff5Min = computed(() => calcDiff(buyVol5Min.value, sellVol5Min.value))
@@ -134,67 +143,66 @@ createApp({
       const total = buy + sell
       return total ? (buy / total) * 100 : 50
     }
+
     const buyPercent30Sec = computed(() => calcBuyPercent(buyVol30Sec.value, sellVol30Sec.value))
     const buyPercent2Min = computed(() => calcBuyPercent(buyVol2Min.value, sellVol2Min.value))
     const buyPercent5Min = computed(() => calcBuyPercent(buyVol5Min.value, sellVol5Min.value))
 
-    // Pseudo-trades from 5-min snapshots
+    // Pseudo-trades from snapshots
     const pseudoTrades = computed(() => {
       const arr = []
       recentSnapshots5Min.value.forEach(snap => {
-        if (snap.buy_volume > 0) {
+        if (snap.buy_volume > 0 && snap.buy_avg_price > 0) {
           arr.push({
             side: 'BUY',
             volume: snap.buy_volume,
-            price: snap.buy_max_price,
+            count: snap.buy_count,
+            price: snap.buy_avg_price,
             timestamp: snap.timestamp
           })
         }
-        if (snap.sell_volume > 0) {
+        if (snap.sell_volume > 0 && snap.sell_avg_price > 0) {
           arr.push({
             side: 'SELL',
             volume: snap.sell_volume,
-            price: snap.sell_min_price,
+            count: snap.sell_count,
+            price: snap.sell_avg_price,
             timestamp: snap.timestamp
           })
         }
       })
-      // Sort by timestamp desc
-      return arr.sort((a,b) => b.timestamp - a.timestamp)
+      return arr.sort((a, b) => b.timestamp - a.timestamp)
     })
 
     const MAX_TRADES = 50
     const buyTradesLimited = computed(() => {
       const buys = pseudoTrades.value.filter(t => t.side === 'BUY')
-      return buys.slice(0, MAX_TRADES).map(t => ({ ...t }))
+      return buys.slice(0, MAX_TRADES)
     })
     const sellTradesLimited = computed(() => {
       const sells = pseudoTrades.value.filter(t => t.side === 'SELL')
-      return sells.slice(0, MAX_TRADES).map(t => ({ ...t }))
+      return sells.slice(0, MAX_TRADES)
     })
 
-    // Max volume for 5-min to scale bar widths
+    // Max volume for scaling
     const maxVol5Min = computed(() => {
       let maxVol = 0
       pseudoTrades.value.forEach(t => {
-        if (t.volume > maxVol) {
-          maxVol = t.volume
-        }
+        if (t.volume > maxVol) maxVol = t.volume
       })
       return maxVol
     })
 
-    // Dynamic style for trades (background color depends on volume ratio)
+    // Trade styling
     function dynamicStyle(trade) {
       const ratio = maxVol5Min.value ? (trade.volume / maxVol5Min.value) : 0
       const alpha = 0.1 + ratio * 0.8
       const color = trade.side === 'BUY'
         ? `rgba(34, 197, 94, ${alpha})`   // green
-        : `rgba(239, 68, 68, ${alpha})`  // red
+        : `rgba(239, 68, 68, ${alpha})`   // red
       return { backgroundColor: color }
     }
 
-    // Sizing: huge, large, medium, etc.
     function getTradeSize(volume, maxVol) {
       if (!maxVol) return ''
       const ratio = volume / maxVol
@@ -204,13 +212,12 @@ createApp({
       return ''
     }
 
-    // Last 10s trades count (for speedometer)
+    // Recent trades count for speedometer
     const last10SecTradesCount = computed(() => {
-      const cutoff = Date.now() - CONSTANTS.TEN_SECONDS
-      return pseudoTrades.value.filter(t => t.timestamp > cutoff).length
+      return recentSnapshots10Sec.value.reduce((sum, snap) =>
+        sum + snap.buy_count + snap.sell_count, 0)
     })
 
-    // Speedometer arrow style
     const speedometerArrowStyle = computed(() => {
       const count = last10SecTradesCount.value
       const maxCount = 100
@@ -218,60 +225,46 @@ createApp({
       return { transform: `translateX(-50%) rotate(${angle - 90}deg)` }
     })
 
-    // Range for 2 min
-    const range2Min = computed(() => {
-      return maxPrice2Min.value - minPrice2Min.value
-    })
+    // 2min range and trends
+    const range2Min = computed(() => maxPrice2Min.value - minPrice2Min.value)
 
-    // 10s buy/sell
     const tenSecBuy = computed(() => metrics10Sec.value.buyVolumeTotal)
     const tenSecSell = computed(() => metrics10Sec.value.sellVolumeTotal)
 
-    // The color of the 10s segment: green if buy >= sell, else red
-    const tenSecTrendColor = computed(() => {
-      return tenSecBuy.value >= tenSecSell.value ? 'var(--bull)' : 'var(--bear)'
-    })
+    const tenSecTrendColor = computed(() =>
+      tenSecBuy.value >= tenSecSell.value ? 'var(--bull)' : 'var(--bear)'
+    )
 
-    // min/max for 10s
-    const minPrice10Sec = computed(() => metrics10Sec.value.minPrice)
-    const maxPrice10Sec = computed(() => metrics10Sec.value.maxPrice)
-
-    // The position of the 10s segment inside 2m
+    // Slider positioning
     const slider10SecStyle2Min = computed(() => {
-      if (!range2Min.value) {
-        return { left: '0%', width: '0%' }
-      }
-      const leftVal = Math.max(minPrice10Sec.value, minPrice2Min.value)
-      const rightVal = Math.min(maxPrice10Sec.value, maxPrice2Min.value)
+      if (!range2Min.value) return { left: '0%', width: '0%' }
+
+      const leftVal = Math.max(metrics10Sec.value.minPrice, minPrice2Min.value)
+      const rightVal = Math.min(metrics10Sec.value.maxPrice, maxPrice2Min.value)
       const leftPct = ((leftVal - minPrice2Min.value) / range2Min.value) * 100
       const widthPct = ((rightVal - leftVal) / range2Min.value) * 100
+
       return {
         left: leftPct + '%',
         width: widthPct + '%'
       }
     })
 
-    // Difference: price2Min vs. vwap30Sec
+    // Price differences
     const price2MinDiff30Sec = computed(() => {
       if (!vwap30Sec.value) return 0
-      const base = vwap30Sec.value
-      const p2m = price2Min.value
-      if (!base) return 0
-      return ((p2m - base) / base) * 100
+      return ((price2Min.value - vwap30Sec.value) / vwap30Sec.value) * 100
     })
 
-    // White marker for current price
     const currentPriceMarkerStyle = computed(() => {
-      if (!range2Min.value) {
-        return { left: '0%' }
-      }
+      if (!range2Min.value) return { left: '0%' }
       const cur = price2Min.value
       const clamped = Math.min(Math.max(cur, minPrice2Min.value), maxPrice2Min.value)
       const pct = ((clamped - minPrice2Min.value) / range2Min.value) * 100
       return { left: pct + '%' }
     })
 
-    // Timeframe completeness (demo)
+    // Time completeness tracking
     const timeFrameCompleteness = computed(() => {
       if (!startTime.value || isDataStale.value) {
         return { thirty: 0, twoMin: 0, fiveMin: 0 }
@@ -284,13 +277,75 @@ createApp({
       }
     })
 
-    // Helpers
+    // Exchange aggregation and sorting
+    const sortedExchanges5Min = computed(() => {
+      const arr = recentSnapshots5Min.value
+      const map = new Map()
+
+      arr.forEach(snap => {
+        if (!map.has(snap.exchange)) {
+          map.set(snap.exchange, {
+            name: snap.exchange,
+            totalVol: 0,
+            sumPV: 0,
+            sumV: 0
+          })
+        }
+
+        const info = map.get(snap.exchange)
+        const vol = snap.buy_volume + snap.sell_volume
+        info.totalVol += vol
+
+        // Only add to price-volume sum if prices are valid
+        if (snap.buy_avg_price > 0) {
+          info.sumPV += snap.buy_volume * snap.buy_avg_price
+        }
+        if (snap.sell_avg_price > 0) {
+          info.sumPV += snap.sell_volume * snap.sell_avg_price
+        }
+        info.sumV += vol
+      })
+
+      const basePrice = metrics5Min.value.avgPrice
+      const result = []
+
+      map.forEach(info => {
+        const price = info.sumV ? (info.sumPV / info.sumV) : 0
+        const diff = basePrice ? ((price - basePrice) / basePrice) * 100 : 0
+        result.push({
+          name: info.name,
+          totalVol: info.totalVol,
+          price: price,
+          diff: diff
+        })
+      })
+
+      return result.sort((a, b) => b.totalVol - a.totalVol)
+    })
+
+    // Exchange-specific metrics
+    function exComputed(exchangeName, seconds) {
+      const cutoff = Date.now() - seconds * 1000
+      const exArr = snapshots.value.filter(s =>
+        s.exchange === exchangeName && s.timestamp > cutoff
+      )
+
+      let buy = 0, sell = 0
+      exArr.forEach(s => {
+        buy += s.buy_volume
+        sell += s.sell_volume
+      })
+
+      return {
+        buyPercent: calcBuyPercent(buy, sell)
+      }
+    }
+
+    // Format helpers
     function formatNumber(n, type = 'default') {
       if (n === undefined || n === null || isNaN(n)) return '0'
       switch (type) {
         case 'volume':
-          return Number(n).toFixed(4)
-        case 'price':
           return Number(n).toFixed(2)
         case 'diff':
           return Number(n).toFixed(2)
@@ -309,71 +364,24 @@ createApp({
       return val > 0 ? '+' : (val < 0 ? '-' : '')
     }
 
-    // Sort exchanges (5m)
-    const sortedExchanges5Min = computed(() => {
-      const arr = recentSnapshots5Min.value
-      const map = new Map()
-      arr.forEach(snap => {
-        if (!map.has(snap.exchange)) {
-          map.set(snap.exchange, {
-            name: snap.exchange,
-            totalVol: 0,
-            sumPV: 0,
-            sumV: 0
-          })
-        }
-        const info = map.get(snap.exchange)
-        const vol = snap.buy_volume + snap.sell_volume
-        info.totalVol += vol
-        info.sumPV += snap.buy_volume * snap.buy_avg_price
-        info.sumPV += snap.sell_volume * snap.sell_avg_price
-        info.sumV += vol
-      })
-
-      const basePrice = metrics5Min.value.avgPrice
-      const result = []
-      map.forEach(info => {
-        const price = info.sumV ? (info.sumPV / info.sumV) : 0
-        const diff = basePrice ? ((price - basePrice) / basePrice) * 100 : 0
-        result.push({
-          name: info.name,
-          totalVol: info.totalVol,
-          price: price,
-          diff: diff
-        })
-      })
-      return result.sort((a,b) => b.totalVol - a.totalVol)
-    })
-
-    // Compute Buy% for a specific exchange over X seconds
-    function exComputed(exchangeName, seconds) {
-      const cutoff = Date.now() - seconds * 1000
-      const exArr = snapshots.value.filter(s => s.exchange === exchangeName && s.timestamp > cutoff)
-      let buy = 0, sell = 0
-      exArr.forEach(s => {
-        buy += s.buy_volume
-        sell += s.sell_volume
-      })
-      return {
-        buyPercent: calcBuyPercent(buy, sell)
-      }
-    }
-
-    // WebSocket
+    // WebSocket initialization and connection
     const ws = new window.WebSocketService({
-      url: 'wss://api.coinybubble.com/ws/btc',
+      url: 'wss://btc.coinybubble.com/ws/btc',
       debug: true,
       onMessage: (msg) => {
         lastMessageTime.value = Date.now()
         if (!startTime.value) {
           startTime.value = Date.now()
         }
-        const newItems = Array.isArray(msg) ? msg : [msg]
-        const valid = newItems.filter(x => x.exchange && x.timestamp)
-        snapshots.value.push(...valid)
-        // Keep only 5-min worth of data
-        const cut = Date.now() - CONSTANTS.FIVE_MINUTES
-        snapshots.value = snapshots.value.filter(s => s.timestamp > cut)
+
+        // Validate and process incoming message
+        if (msg && msg.exchange && msg.timestamp) {
+          snapshots.value.push(msg)
+
+          // Keep only last 5 minutes of data
+          const cutoff = Date.now() - CONSTANTS.FIVE_MINUTES
+          snapshots.value = snapshots.value.filter(s => s.timestamp > cutoff)
+        }
       },
       onConnected: () => {
         wsStatus.value = 'connected'
@@ -387,6 +395,7 @@ createApp({
     })
     ws.connect()
 
+    // Return all computed properties and methods
     return {
       wsStatus,
       isDataStale,
@@ -409,7 +418,7 @@ createApp({
       volumeDiff5Min,
       buyPercent5Min,
 
-      // Pseudo trades
+      // Trades and styling
       pseudoTrades,
       buyTradesLimited,
       sellTradesLimited,
@@ -421,18 +430,16 @@ createApp({
       tenSecBuy,
       tenSecSell,
       tenSecTrendColor,
-      minPrice10Sec,
-      maxPrice10Sec,
       slider10SecStyle2Min,
 
-      // White marker for current price (2m)
+      // Current price marker
       currentPriceMarkerStyle,
 
       // Speedometer
       last10SecTradesCount,
       speedometerArrowStyle,
 
-      // Price difference vs. vwap30Sec
+      // Price difference
       price2MinDiff30Sec,
 
       // Time completeness
@@ -442,7 +449,7 @@ createApp({
       sortedExchanges5Min,
       exComputed,
 
-      // Helpers
+      // Formatting helpers
       formatNumber,
       formatDiff,
       signOf
