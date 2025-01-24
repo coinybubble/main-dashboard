@@ -200,7 +200,13 @@ body {
 }
 
 .metric-bar {
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.price-diff-bar.center-bar,
+.volume-bar-small.center-bar {
+  margin-bottom: 0 !important;
 }
 
 .metric-value {
