@@ -1,6 +1,6 @@
 class WebSocketService {
   constructor(options = {}) {
-    this.url = options.url || 'wss://btc.coinybubble.com/ws/btc';
+    this.url = options.url || 'wss://trumpws.coinybubble.com/ws/trump';
     this.onMessage = options.onMessage || (() => {});
     this.onConnected = options.onConnected || (() => {});
     this.onDisconnected = options.onDisconnected || (() => {});
