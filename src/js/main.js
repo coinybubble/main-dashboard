@@ -436,7 +436,7 @@ createApp({
     let ws;
     try {
       ws = new WebSocketService({
-        url: 'wss://btc.coinybubble.com/ws/btc',
+        url: 'wss://trumpws.coinybubble.com/ws/trump',
         debug: true,
         onMessage: (msg) => {
           try {
