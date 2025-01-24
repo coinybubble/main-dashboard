@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Trading Dashboard</title>
   <!-- Vue (development version for local testing) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.prod.js"></script>
   <!-- Styles -->
   <link rel="stylesheet" href="src/css/main.css" />
 </head>
@@ -37,7 +37,7 @@
         </div>
       </div>
 
-      <!-- 2-minute slider with minPrice2Min..maxPrice2Min -->
+      <!-- 2-minute slider with highlight of 10s range -->
       <div class="range-slider-2min">
         <div class="range-labels-2min">
           <span>${{ formatNumber(minPrice2Min, 'price') }}</span>
@@ -57,16 +57,16 @@
         </div>
       </div>
 
-      <!-- 2m avg price and diff vs 30s -->
+      <!-- 10s avg price and diff vs 30s -->
       <div class="current-price-container">
         <div
           class="current-price"
-          :class="price2MinDiff30Sec >= 0 ? 'bull' : 'bear'"
+          :class="price10SecDiff30Sec >= 0 ? 'bull' : 'bear'"
         >
-          ${{ formatNumber(price2Min, 'price') }}
+          ${{ formatNumber(price10Sec, 'price') }}
           <span class="price-diff">
-            {{ signOf(price2MinDiff30Sec) }}
-            {{ formatNumber(Math.abs(price2MinDiff30Sec), 'diff') }}%
+            {{ signOf(price10SecDiff30Sec) }}
+            {{ formatNumber(Math.abs(price10SecDiff30Sec), 'diff') }}%
           </span>
         </div>
       </div>
@@ -118,33 +118,31 @@
         </div>
       </div>
 
-      <!-- Price bar (center-based between minPrice30Sec and maxPrice30Sec) -->
-      <div class="price-diff-bar center-bar">
-        <div class="trade-diff-fill" :style="priceDiffStyle30Sec"></div>
-        <div class="price-diff-marker"></div>
-      </div>
-      <div class="trade-diff-result" style="margin-bottom: 10px">
-        <span v-if="priceDiff30Sec.value > 0" class="bull">
-          +{{ formatNumber(priceDiff30Sec.value, 'diff') }}%
-        </span>
-        <span v-else-if="priceDiff30Sec.value < 0" class="bear">
-          {{ formatNumber(priceDiff30Sec.value, 'diff') }}%
-        </span>
-        <span v-else>0%</span>
+      <!-- Price Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Price Diff:</div>
+        <div class="metric-bar">
+          <div class="price-diff-bar center-bar">
+            <div class="trade-diff-fill" :style="priceDiffStyle30Sec"></div>
+            <div class="price-diff-marker"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="priceDiff30Sec.value > 0 ? 'bull' : 'bear'">
+          {{ priceDiff30Sec.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff30Sec.value, 'diff') }}%
+        </div>
       </div>
 
-      <!-- Volume bar (center-based, buyPercent - 50) -->
-      <div class="volume-bar-small center-bar">
-        <div class="trade-diff-fill" :style="volumeBarStyle30Sec"></div>
-      </div>
-      <div class="trade-diff-result">
-        <span v-if="volumeBarDiff30Sec > 0" class="bull">
-          +{{ formatNumber(volumeBarDiff30Sec, 'diff') }}% Buy
-        </span>
-        <span v-else-if="volumeBarDiff30Sec < 0" class="bear">
-          {{ formatNumber(volumeBarDiff30Sec, 'diff') }}% Buy
-        </span>
-        <span v-else>50% Buy</span>
+      <!-- Volume Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Vol Diff:</div>
+        <div class="metric-bar">
+          <div class="volume-bar-small center-bar">
+            <div class="trade-diff-fill" :style="volumeBarStyle30Sec"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="volumeBarDiff30Sec > 0 ? 'bull' : 'bear'">
+          {{ volumeBarDiff30Sec > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff30Sec, 'diff') }}%
+        </div>
       </div>
 
       <div class="volume-stats">
@@ -181,31 +179,31 @@
         </div>
       </div>
 
-      <div class="price-diff-bar center-bar">
-        <div class="trade-diff-fill" :style="priceDiffStyle2Min"></div>
-        <div class="price-diff-marker"></div>
-      </div>
-      <div class="trade-diff-result" style="margin-bottom: 10px">
-        <span v-if="priceDiff2Min.value > 0" class="bull">
-          +{{ formatNumber(priceDiff2Min.value, 'diff') }}%
-        </span>
-        <span v-else-if="priceDiff2Min.value < 0" class="bear">
-          {{ formatNumber(priceDiff2Min.value, 'diff') }}%
-        </span>
-        <span v-else>0%</span>
+      <!-- Price Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Price Diff:</div>
+        <div class="metric-bar">
+          <div class="price-diff-bar center-bar">
+            <div class="trade-diff-fill" :style="priceDiffStyle2Min"></div>
+            <div class="price-diff-marker"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="priceDiff2Min.value > 0 ? 'bull' : 'bear'">
+          {{ priceDiff2Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff2Min.value, 'diff') }}%
+        </div>
       </div>
 
-      <div class="volume-bar-small center-bar">
-        <div class="trade-diff-fill" :style="volumeBarStyle2Min"></div>
-      </div>
-      <div class="trade-diff-result">
-        <span v-if="volumeBarDiff2Min > 0" class="bull">
-          +{{ formatNumber(volumeBarDiff2Min, 'diff') }}% Buy
-        </span>
-        <span v-else-if="volumeBarDiff2Min < 0" class="bear">
-          {{ formatNumber(volumeBarDiff2Min, 'diff') }}% Buy
-        </span>
-        <span v-else>50% Buy</span>
+      <!-- Volume Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Vol Diff:</div>
+        <div class="metric-bar">
+          <div class="volume-bar-small center-bar">
+            <div class="trade-diff-fill" :style="volumeBarStyle2Min"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="volumeBarDiff2Min > 0 ? 'bull' : 'bear'">
+          {{ volumeBarDiff2Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff2Min, 'diff') }}%
+        </div>
       </div>
 
       <div class="volume-stats">
@@ -242,31 +240,31 @@
         </div>
       </div>
 
-      <div class="price-diff-bar center-bar">
-        <div class="trade-diff-fill" :style="priceDiffStyle5Min"></div>
-        <div class="price-diff-marker"></div>
-      </div>
-      <div class="trade-diff-result" style="margin-bottom: 10px">
-        <span v-if="priceDiff5Min.value > 0" class="bull">
-          +{{ formatNumber(priceDiff5Min.value, 'diff') }}%
-        </span>
-        <span v-else-if="priceDiff5Min.value < 0" class="bear">
-          {{ formatNumber(priceDiff5Min.value, 'diff') }}%
-        </span>
-        <span v-else>0%</span>
+      <!-- Price Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Price Diff:</div>
+        <div class="metric-bar">
+          <div class="price-diff-bar center-bar">
+            <div class="trade-diff-fill" :style="priceDiffStyle5Min"></div>
+            <div class="price-diff-marker"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="priceDiff5Min.value > 0 ? 'bull' : 'bear'">
+          {{ priceDiff5Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff5Min.value, 'diff') }}%
+        </div>
       </div>
 
-      <div class="volume-bar-small center-bar">
-        <div class="trade-diff-fill" :style="volumeBarStyle5Min"></div>
-      </div>
-      <div class="trade-diff-result">
-        <span v-if="volumeBarDiff5Min > 0" class="bull">
-          +{{ formatNumber(volumeBarDiff5Min, 'diff') }}% Buy
-        </span>
-        <span v-else-if="volumeBarDiff5Min < 0" class="bear">
-          {{ formatNumber(volumeBarDiff5Min, 'diff') }}% Buy
-        </span>
-        <span v-else>50% Buy</span>
+      <!-- Volume Diff row -->
+      <div class="metrics-row">
+        <div class="metric-label">Vol Diff:</div>
+        <div class="metric-bar">
+          <div class="volume-bar-small center-bar">
+            <div class="trade-diff-fill" :style="volumeBarStyle5Min"></div>
+          </div>
+        </div>
+        <div class="metric-value" :class="volumeBarDiff5Min > 0 ? 'bull' : 'bear'">
+          {{ volumeBarDiff5Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff5Min, 'diff') }}%
+        </div>
       </div>
 
       <div class="volume-stats">
@@ -287,7 +285,7 @@
         </div>
       </div>
     </div>
-  </div>
+  </div> <!-- .top-row -->
 
   <!-- Bottom row: Exchanges + Trades -->
   <div class="bottom-row">

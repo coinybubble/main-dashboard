@@ -185,6 +185,31 @@ body {
   margin-bottom: 5px;
 }
 
+.metrics-row {
+  display: grid;
+  grid-template-columns: 85px 1fr 75px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.metric-label {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  text-align: right;
+}
+
+.metric-bar {
+  width: 100%;
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  text-align: right;
+  min-width: 75px;
+}
+
 /* Price bar (center-based) */
 .price-diff-bar {
   position: relative;
@@ -391,6 +416,7 @@ body {
   text-align: center;
   opacity: 0.8;
 }
+
 
 /* Trades */
 .trades-card {
