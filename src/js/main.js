@@ -1,6 +1,6 @@
 // src/js/main.js
 
-const { createApp, ref, computed, onUnmounted } = Vue;
+const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
 const CONSTANTS = {
   THIRTY_SECONDS: 30000,
@@ -18,46 +18,61 @@ createApp({
     const wsStatus = ref('disconnected');
     const connectionError = ref(null);
 
+    // We need a reactive current time to recalc progress over time
+    const currentTime = ref(Date.now());
+    let timerId = null;
+
+    onMounted(() => {
+      // Update 'currentTime' every second
+      timerId = setInterval(() => {
+        currentTime.value = Date.now();
+      }, 1000);
+    });
+
+    onUnmounted(() => {
+      if (timerId) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+      if (ws) ws.disconnect();
+      snapshotCache.clear();
+    });
+
+    // If no new data for >10s, we mark data as stale
     const isDataStale = computed(() => {
       if (!lastMessageTime.value) return true;
-      return Date.now() - lastMessageTime.value > 10000;
+      return currentTime.value - lastMessageTime.value > 10000;
     });
 
     const snapshotCache = new Map();
 
     function getRecentSnapshots(seconds) {
-      try {
-        const now = Date.now();
-        const cacheKey = `${seconds}-${Math.floor(now / 1000)}`;
-
-        if (snapshotCache.has(cacheKey)) {
-          return snapshotCache.get(cacheKey);
-        }
-
-        const cutoff = now - seconds * 1000;
-        const result = snapshots.value.filter(
-          s => s && s.timestamp && s.timestamp > cutoff
-        );
-
-        snapshotCache.set(cacheKey, result);
-
-        if (snapshotCache.size > 10) {
-          const oldestKey = Array.from(snapshotCache.keys())[0];
-          snapshotCache.delete(oldestKey);
-        }
-
-        return result;
-      } catch (error) {
-        console.error('Error in getRecentSnapshots:', error);
-        return [];
+      const now = currentTime.value;
+      const cacheKey = `${seconds}-${Math.floor(now / 1000)}`;
+      if (snapshotCache.has(cacheKey)) {
+        return snapshotCache.get(cacheKey);
       }
+      const cutoff = now - seconds * 1000;
+      const result = snapshots.value.filter(
+        s => s && s.timestamp && s.timestamp > cutoff
+      );
+      snapshotCache.set(cacheKey, result);
+
+      // Limit cache size
+      if (snapshotCache.size > 10) {
+        const oldestKey = Array.from(snapshotCache.keys())[0];
+        snapshotCache.delete(oldestKey);
+      }
+      return result;
     }
 
+    // Computed slices for 10s, 30s, 2m, 5m
     const recentSnapshots10Sec = computed(() => getRecentSnapshots(10));
     const recentSnapshots30Sec = computed(() => getRecentSnapshots(30));
     const recentSnapshots2Min = computed(() => getRecentSnapshots(120));
     const recentSnapshots5Min = computed(() => getRecentSnapshots(300));
 
+    // 10s buy/sell trade counts
     const buyTradesCount10s = computed(() =>
       recentSnapshots10Sec.value.reduce((sum, s) => sum + (s.buy_count || 0), 0)
     );
@@ -75,47 +90,37 @@ createApp({
           maxPrice: 0
         };
       }
-      try {
-        let buySum = 0;
-        let sellSum = 0;
-        const prices = [];
+      let buySum = 0;
+      let sellSum = 0;
+      const prices = [];
 
-        arr.forEach(s => {
-          buySum += s.buy_volume || 0;
-          sellSum += s.sell_volume || 0;
-          if (s.buy_volume > 0 && s.buy_avg_price > 0) {
-            prices.push(s.buy_avg_price);
-          }
-          if (s.sell_volume > 0 && s.sell_avg_price > 0) {
-            prices.push(s.sell_avg_price);
-          }
-        });
+      arr.forEach(s => {
+        buySum += s.buy_volume || 0;
+        sellSum += s.sell_volume || 0;
+        if (s.buy_volume > 0 && s.buy_avg_price > 0) {
+          prices.push(s.buy_avg_price);
+        }
+        if (s.sell_volume > 0 && s.sell_avg_price > 0) {
+          prices.push(s.sell_avg_price);
+        }
+      });
 
-        const avgPrice = prices.length
-          ? prices.reduce((a, b) => a + b, 0) / prices.length
-          : 0;
-        const minP = prices.length ? Math.min(...prices) : 0;
-        const maxP = prices.length ? Math.max(...prices) : 0;
+      const avgPrice = prices.length
+        ? prices.reduce((a, b) => a + b, 0) / prices.length
+        : 0;
+      const minP = prices.length ? Math.min(...prices) : 0;
+      const maxP = prices.length ? Math.max(...prices) : 0;
 
-        return {
-          buyVolumeTotal: buySum,
-          sellVolumeTotal: sellSum,
-          avgPrice,
-          minPrice: minP,
-          maxPrice: maxP
-        };
-      } catch (err) {
-        console.error('Error in aggregateMetrics:', err);
-        return {
-          buyVolumeTotal: 0,
-          sellVolumeTotal: 0,
-          avgPrice: 0,
-          minPrice: 0,
-          maxPrice: 0
-        };
-      }
+      return {
+        buyVolumeTotal: buySum,
+        sellVolumeTotal: sellSum,
+        avgPrice,
+        minPrice: minP,
+        maxPrice: maxP
+      };
     }
 
+    // Metrics for 10s, 30s, 2m, 5m
     const metrics10Sec = computed(() => aggregateMetrics(recentSnapshots10Sec.value));
     const metrics30Sec = computed(() => aggregateMetrics(recentSnapshots30Sec.value));
     const metrics2Min = computed(() => aggregateMetrics(recentSnapshots2Min.value));
@@ -129,11 +134,13 @@ createApp({
     const minPrice2Min = computed(() => metrics2Min.value.minPrice);
     const maxPrice2Min = computed(() => metrics2Min.value.maxPrice);
 
+    // 10s vs 30s diff in %
     const price10SecDiff30Sec = computed(() => {
       if (!price30Sec.value) return 0;
       return ((price10Sec.value - price30Sec.value) / price30Sec.value) * 100;
     });
 
+    // Volumes
     const buyVol30Sec = computed(() => metrics30Sec.value.buyVolumeTotal);
     const sellVol30Sec = computed(() => metrics30Sec.value.sellVolumeTotal);
     const buyVol2Min = computed(() => metrics2Min.value.buyVolumeTotal);
@@ -141,6 +148,7 @@ createApp({
     const buyVol5Min = computed(() => metrics5Min.value.buyVolumeTotal);
     const sellVol5Min = computed(() => metrics5Min.value.sellVolumeTotal);
 
+    // (buy - sell)
     function calcDiff(buy, sell) {
       const diff = buy - sell;
       return {
@@ -152,6 +160,7 @@ createApp({
     const volumeDiff2Min = computed(() => calcDiff(buyVol2Min.value, sellVol2Min.value));
     const volumeDiff5Min = computed(() => calcDiff(buyVol5Min.value, sellVol5Min.value));
 
+    // Buy ratio in %
     function calcBuyPercent(buy, sell) {
       const total = buy + sell;
       return total > 0 ? (buy / total) * 100 : 50;
@@ -160,11 +169,15 @@ createApp({
     const buyPercent2Min = computed(() => calcBuyPercent(buyVol2Min.value, sellVol2Min.value));
     const buyPercent5Min = computed(() => calcBuyPercent(buyVol5Min.value, sellVol5Min.value));
 
+    /**
+     * Timeframe completeness from 0% to 100%.
+     * We rely on 'startTime' + 'currentTime' to see how long it's been since we connected.
+     */
     const timeFrameCompleteness = computed(() => {
-      if (!startTime.value || isDataStale.value) {
+      if (!startTime.value) {
         return { thirty: 0, twoMin: 0, fiveMin: 0 };
       }
-      const elapsed = Date.now() - startTime.value;
+      const elapsed = currentTime.value - startTime.value;
       return {
         thirty: Math.min((elapsed / CONSTANTS.THIRTY_SECONDS) * 100, 100),
         twoMin: Math.min((elapsed / CONSTANTS.TWO_MINUTES) * 100, 100),
@@ -172,6 +185,7 @@ createApp({
       };
     });
 
+    // Collect trades from snapshots for the last 5m
     function processTrades(snapArray) {
       if (!Array.isArray(snapArray)) return [];
       const trades = [];
@@ -196,10 +210,13 @@ createApp({
           });
         }
       });
+      // Sort descending by timestamp
       return trades.sort((a, b) => b.timestamp - a.timestamp);
     }
 
-    const MAX_TRADES = 50;
+    // CHANGED: reduce max trades from 50 to 25
+    const MAX_TRADES = 25;
+
     const buyTradesLimited = computed(() => {
       const trades = processTrades(recentSnapshots5Min.value);
       return trades.filter(t => t.side === 'BUY').slice(0, MAX_TRADES);
@@ -209,43 +226,49 @@ createApp({
       return trades.filter(t => t.side === 'SELL').slice(0, MAX_TRADES);
     });
 
+    // Maximum volume in last 5m for highlighting big trades
     const maxVol5Min = computed(() => {
       const trades = processTrades(recentSnapshots5Min.value);
       return Math.max(...trades.map(t => t.volume), 0);
     });
 
+    // Background color in trades list based on volume ratio
     function dynamicStyle(trade) {
       if (!trade || !maxVol5Min.value) {
         return { backgroundColor: 'transparent' };
       }
       const ratio = trade.volume / maxVol5Min.value;
       const alpha = 0.1 + Math.min(ratio * 0.8, 0.9);
-      const color =
-        trade.side === 'BUY'
-          ? `rgba(34,197,94,${alpha})`
-          : `rgba(239,68,68,${alpha})`;
+      const color = trade.side === 'BUY'
+        ? `rgba(34,197,94,${alpha})`
+        : `rgba(239,68,68,${alpha})`;
       return { backgroundColor: color };
     }
+
+    // Size class based on relative volume
     function getTradeSize(volume, maxVol) {
       if (!volume || !maxVol) return '';
       const ratio = volume / maxVol;
-      if (ratio > 0.75) return 'huge';
-      if (ratio > 0.5) return 'large';
-      if (ratio > 0.25) return 'medium';
+      if (ratio > 0.75) return 'text-lg font-bold';
+      if (ratio > 0.5) return 'text-base font-semibold';
+      if (ratio > 0.25) return 'font-semibold';
       return '';
     }
 
-    // 10s diff bar
+    // 10s trades difference
     const tradeDiff = computed(() => buyTradesCount10s.value - sellTradesCount10s.value);
+
+    // Center-based progress bar style
     function centerBarStyle(diff) {
       const clamped = Math.max(-100, Math.min(diff, 100));
-      const color = clamped >= 0 ? 'var(--bull)' : 'var(--bear)';
+      const color = clamped >= 0 ? 'rgb(34 197 94)' : 'rgb(239 68 68)';
       return {
         width: Math.abs(clamped) + '%',
         marginLeft: clamped >= 0 ? '50%' : (50 + clamped) + '%',
         background: color
       };
     }
+
     const tradeDiffStyle = computed(() => {
       const total = buyTradesCount10s.value + sellTradesCount10s.value;
       if (!total) {
@@ -255,6 +278,7 @@ createApp({
       return centerBarStyle(diffPercent);
     });
 
+    // price-centered diff
     function priceCenteredDiff(minVal, maxVal, currentVal) {
       if (!maxVal || maxVal <= minVal) return 0;
       const mid = (minVal + maxVal) / 2;
@@ -262,33 +286,26 @@ createApp({
       return Math.max(-100, Math.min(((currentVal - mid) / halfRange) * 100, 100));
     }
 
-    // 30s price diff
+    // Price diffs for 30s, 2m, 5m
     const priceDiff30Sec = computed(() => {
-      const minP = metrics30Sec.value.minPrice;
-      const maxP = metrics30Sec.value.maxPrice;
-      const curP = metrics30Sec.value.avgPrice;
-      return { value: priceCenteredDiff(minP, maxP, curP) };
+      const { minPrice, maxPrice, avgPrice } = metrics30Sec.value;
+      return { value: priceCenteredDiff(minPrice, maxPrice, avgPrice) };
     });
     const priceDiffStyle30Sec = computed(() => centerBarStyle(priceDiff30Sec.value.value));
 
-    // 2m price diff
     const priceDiff2Min = computed(() => {
-      const minP = metrics2Min.value.minPrice;
-      const maxP = metrics2Min.value.maxPrice;
-      const curP = metrics2Min.value.avgPrice;
-      return { value: priceCenteredDiff(minP, maxP, curP) };
+      const { minPrice, maxPrice, avgPrice } = metrics2Min.value;
+      return { value: priceCenteredDiff(minPrice, maxPrice, avgPrice) };
     });
     const priceDiffStyle2Min = computed(() => centerBarStyle(priceDiff2Min.value.value));
 
-    // 5m price diff
     const priceDiff5Min = computed(() => {
-      const minP = metrics5Min.value.minPrice;
-      const maxP = metrics5Min.value.maxPrice;
-      const curP = metrics5Min.value.avgPrice;
-      return { value: priceCenteredDiff(minP, maxP, curP) };
+      const { minPrice, maxPrice, avgPrice } = metrics5Min.value;
+      return { value: priceCenteredDiff(minPrice, maxPrice, avgPrice) };
     });
     const priceDiffStyle5Min = computed(() => centerBarStyle(priceDiff5Min.value.value));
 
+    // Volume bars (30s, 2m, 5m)
     const volumeBarDiff30Sec = computed(() => buyPercent30Sec.value - 50);
     const volumeBarDiff2Min = computed(() => buyPercent2Min.value - 50);
     const volumeBarDiff5Min = computed(() => buyPercent5Min.value - 50);
@@ -297,6 +314,7 @@ createApp({
     const volumeBarStyle2Min = computed(() => centerBarStyle(volumeBarDiff2Min.value));
     const volumeBarStyle5Min = computed(() => centerBarStyle(volumeBarDiff5Min.value));
 
+    // Exchanges (5m)
     const sortedExchanges5Min = computed(() => {
       const map = new Map();
       recentSnapshots5Min.value.forEach(s => {
@@ -335,12 +353,15 @@ createApp({
           diff
         });
       });
+      // sort by volume desc
       return arr.sort((a, b) => b.totalVol - a.totalVol);
     });
 
+    // For each exchange/timeframe: buy percentage
     function exComputed(exchangeName, seconds) {
       if (!exchangeName) return { buyPercent: 50 };
-      const cutoff = Date.now() - seconds * 1000;
+      const now = currentTime.value;
+      const cutoff = now - seconds * 1000;
       const exArr = snapshots.value.filter(
         s => s && s.exchange === exchangeName && s.timestamp > cutoff
       );
@@ -352,17 +373,25 @@ createApp({
       return { buyPercent: calcBuyPercent(buy, sell) };
     }
 
+    // Number formatting
     function formatNumber(n, type = 'default') {
       if (n === undefined || n === null || isNaN(n)) return '0';
       try {
         switch (type) {
-          case 'price': return Number(n).toFixed(2);
-          case 'volume': return Number(n).toFixed(3);
-          case 'diff': return Number(n).toFixed(2);
-          default: return Number(n).toFixed(2);
+          case 'price':
+            return Number(n).toFixed(2);
+          case 'volume':
+            // 3 decimals for trades
+            return Number(n).toFixed(3);
+          case 'volumeShort':
+            // 1 decimal for top blocks, exchanges
+            return Number(n).toFixed(1);
+          case 'diff':
+            return Number(n).toFixed(2);
+          default:
+            return Number(n).toFixed(2);
         }
-      } catch (error) {
-        console.error('Error formatting number:', error);
+      } catch {
         return '0';
       }
     }
@@ -376,6 +405,40 @@ createApp({
       return val > 0 ? '+' : val < 0 ? '-' : '';
     }
 
+    // 10s highlight inside 2m
+    const tenSecTrendColor = computed(() =>
+      metrics10Sec.value.buyVolumeTotal >= metrics10Sec.value.sellVolumeTotal
+        ? 'rgb(34 197 94)'
+        : 'rgb(239 68 68)'
+    );
+    const tenSecRangeStyle2Min = computed(() => {
+      const range = metrics2Min.value.maxPrice - metrics2Min.value.minPrice;
+      if (!range) return { left: '0%', width: '0%' };
+      const min10s = metrics10Sec.value.minPrice;
+      const max10s = metrics10Sec.value.maxPrice;
+      if (!min10s || !max10s) return { left: '0%', width: '0%' };
+
+      const leftVal = Math.max(min10s, metrics2Min.value.minPrice);
+      const rightVal = Math.min(max10s, metrics2Min.value.maxPrice);
+      let leftPct = ((leftVal - metrics2Min.value.minPrice) / range) * 100;
+      let widthPct = ((rightVal - leftVal) / range) * 100;
+      leftPct = Math.max(0, Math.min(leftPct, 100));
+      widthPct = Math.max(0, Math.min(widthPct, 100 - leftPct));
+      return { left: leftPct + '%', width: widthPct + '%' };
+    });
+    const currentPriceMarkerStyle = computed(() => {
+      const range = metrics2Min.value.maxPrice - metrics2Min.value.minPrice;
+      if (!range) return { left: '0%' };
+      const avg10s = metrics10Sec.value.avgPrice;
+      const clamped = Math.min(
+        Math.max(avg10s, metrics2Min.value.minPrice),
+        metrics2Min.value.maxPrice
+      );
+      const pct = ((clamped - metrics2Min.value.minPrice) / range) * 100;
+      return { left: pct + '%' };
+    });
+
+    // WebSocket init
     let ws;
     try {
       ws = new WebSocketService({
@@ -383,14 +446,15 @@ createApp({
         debug: true,
         onMessage: (msg) => {
           try {
-            lastMessageTime.value = Date.now();
+            lastMessageTime.value = currentTime.value;
             if (!startTime.value) {
-              startTime.value = Date.now();
+              // Set the start time at the moment of the first valid message
+              startTime.value = currentTime.value;
             }
             if (msg && msg.exchange && msg.timestamp) {
               snapshots.value.push(msg);
-              // Фильтруем старые данные (более 5 мин)
-              const cutoff = Date.now() - CONSTANTS.FIVE_MINUTES;
+              // Filter out older than 5 minutes
+              const cutoff = currentTime.value - CONSTANTS.FIVE_MINUTES;
               snapshots.value = snapshots.value
                 .filter(s => s.timestamp > cutoff)
                 .slice(-CONSTANTS.MAX_SNAPSHOTS);
@@ -405,6 +469,7 @@ createApp({
           wsStatus.value = 'connected';
           connectionError.value = null;
           snapshots.value = [];
+          // do not set startTime here, wait for the first actual message
           startTime.value = null;
           lastMessageTime.value = null;
           snapshotCache.clear();
@@ -423,17 +488,13 @@ createApp({
       connectionError.value = error.message;
     }
 
-    onUnmounted(() => {
-      if (ws) ws.disconnect();
-      snapshotCache.clear();
-    });
-
     return {
       wsStatus,
       connectionError,
       isDataStale,
+      currentTime,
 
-      // 10s
+      // 10s trades
       buyTradesCount10s,
       sellTradesCount10s,
       price10Sec,
@@ -443,8 +504,6 @@ createApp({
       price30Sec,
       price2Min,
       price5Min,
-
-      // min/max  2m
       minPrice2Min,
       maxPrice2Min,
 
@@ -463,9 +522,22 @@ createApp({
       buyPercent2Min,
       buyPercent5Min,
 
+      timeFrameCompleteness,
+
+      // Trades list (25 max)
+      buyTradesLimited,
+      sellTradesLimited,
+      maxVol5Min,
+      dynamicStyle,
+      getTradeSize,
+
+      // Exchanges
+      sortedExchanges5Min,
+      exComputed,
+
+      // Diffs, bars
       tradeDiff,
       tradeDiffStyle,
-
       priceDiff30Sec,
       priceDiffStyle30Sec,
       priceDiff2Min,
@@ -480,61 +552,15 @@ createApp({
       volumeBarStyle2Min,
       volumeBarStyle5Min,
 
-      timeFrameCompleteness,
-
-      buyTradesLimited,
-      sellTradesLimited,
-      maxVol5Min,
-      dynamicStyle,
-      getTradeSize,
-
-      sortedExchanges5Min,
-      exComputed,
-
+      // Helpers
       formatNumber,
       formatDiff,
       signOf,
 
-      tenSecBuy: computed(() => metrics10Sec.value.buyVolumeTotal),
-      tenSecSell: computed(() => metrics10Sec.value.sellVolumeTotal),
-      tenSecTrendColor: computed(() =>
-        metrics10Sec.value.buyVolumeTotal >= metrics10Sec.value.sellVolumeTotal
-          ? 'var(--bull)'
-          : 'var(--bear)'
-      ),
-      range2Min: computed(() => metrics2Min.value.maxPrice - metrics2Min.value.minPrice),
-
-      tenSecRangeStyle2Min: computed(() => {
-        const range = metrics2Min.value.maxPrice - metrics2Min.value.minPrice;
-        if (!range) return { left: '0%', width: '0%' };
-        const min10s = metrics10Sec.value.minPrice;
-        const max10s = metrics10Sec.value.maxPrice;
-        if (!min10s || !max10s) return { left: '0%', width: '0%' };
-
-        const leftVal = Math.max(min10s, metrics2Min.value.minPrice);
-        const rightVal = Math.min(max10s, metrics2Min.value.maxPrice);
-        let leftPct = ((leftVal - metrics2Min.value.minPrice) / range) * 100;
-        let widthPct = ((rightVal - leftVal) / range) * 100;
-        leftPct = Math.max(0, Math.min(leftPct, 100));
-        widthPct = Math.max(0, Math.min(widthPct, 100 - leftPct));
-        return {
-          left: leftPct + '%',
-          width: widthPct + '%'
-        };
-      }),
-
-      currentPriceMarkerStyle: computed(() => {
-        const range = metrics2Min.value.maxPrice - metrics2Min.value.minPrice;
-        if (!range) return { left: '0%' };
-        const avg10s = metrics10Sec.value.avgPrice;
-        // clamp в пределах minPrice..maxPrice
-        const clamped = Math.min(
-          Math.max(avg10s, metrics2Min.value.minPrice),
-          metrics2Min.value.maxPrice
-        );
-        const pct = ((clamped - metrics2Min.value.minPrice) / range) * 100;
-        return { left: pct + '%' };
-      })
+      // 10s highlight on 2m slider
+      tenSecTrendColor,
+      tenSecRangeStyle2Min,
+      currentPriceMarkerStyle
     };
   }
 }).mount('#app');

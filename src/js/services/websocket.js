@@ -1,3 +1,5 @@
+// src/js/services/websocket.js
+
 class WebSocketService {
   constructor(options = {}) {
     this.url = options.url || 'wss://trumpws.coinybubble.com/ws/trump';
@@ -23,7 +25,7 @@ class WebSocketService {
 
   connect() {
     if (this.isConnecting) {
-      this.log('Connection attempt already in progress');
+      this.log('Connection attempt is already in progress');
       return;
     }
     if (this.ws?.readyState === WebSocket.OPEN) {
@@ -99,10 +101,10 @@ class WebSocketService {
   }
 
   generateMockData() {
-    const basePrice = 45000 + Math.random() * 1000;
-    const volume = Math.random() * 1.5;
+    const basePrice = 27000 + Math.random() * 1000;
+    const volume = Math.random() * 3;
     const timestamp = Date.now();
-    const exchanges = ['binance', 'coinbase', 'kraken'];
+    const exchanges = ['binance', 'coinbase', 'kraken', 'bybit', 'okx'];
     const exchange = exchanges[Math.floor(Math.random() * exchanges.length)];
 
     return {

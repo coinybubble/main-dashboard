@@ -2,421 +2,548 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Trading Dashboard</title>
-  <!-- Vue (development version for local testing) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.prod.js"></script>
-  <!-- Styles -->
-  <link rel="stylesheet" href="src/css/main.css" />
+  <title>Trading Dashboard (Tailwind + Vue 3.5.13)</title>
+
+  <!-- Vue 3.5.13 -->
+  <script src="https://unpkg.com/vue@3.5.13/dist/vue.global.js"></script>
+
+  <!-- Tailwind CSS 4 -->
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+
+  <!-- Minimal custom styles (scrollbars, fade animations, etc.) -->
+  <style>
+    /* Scrollbar styles */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* 'pulse' animation for connected status dot */
+    @keyframes pulse {
+      0%   { opacity: 1; }
+      50%  { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    /* 'fadeIn' animation for new items */
+    @keyframes fadeIn {
+      0% {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.2s ease-out;
+    }
+  </style>
 </head>
-<body>
-<div id="app">
-  <!-- WebSocket error (if any) -->
-  <div v-if="connectionError" class="error-message">
-    {{ connectionError }}
-  </div>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4">
+  <div id="app" class="flex flex-col gap-4">
 
-  <!-- Top row: Global Trend + Volume Balance blocks -->
-  <div class="top-row">
-    <!-- Global Trend -->
-    <div class="card">
-      <div class="title">
-        <span>Global Trend</span>
-        <div class="ws-status">
-          <div
-            :class="[
-              'status-dot',
-              {
-                'status-connected': wsStatus === 'connected' && !isDataStale && !connectionError,
-                'status-disconnected': wsStatus === 'disconnected' || isDataStale || connectionError
-              }
-            ]"
-          ></div>
-          <span v-if="connectionError" class="status-text">Error</span>
-          <span v-else-if="isDataStale" class="status-text">Stale Data</span>
-          <span v-else class="status-text">{{ wsStatus }}</span>
+    <!-- WebSocket error message (if any) -->
+    <div
+      v-if="connectionError"
+      class="bg-red-600 text-white px-4 py-2 rounded-md font-semibold text-center animate-fade-in"
+    >
+      {{ connectionError }}
+    </div>
+
+    <!-- Top row: Global Trend + 30s + 2m + 5m -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+
+      <!-- Global Trend -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow space-y-4 animate-fade-in">
+        <!-- Title -->
+        <div class="flex items-center justify-between text-sky-400 font-semibold">
+          <span>Global Trend</span>
+          <div class="flex items-center gap-2">
+            <div
+              :class="[
+                'w-2 h-2 rounded-full',
+                wsStatus === 'connected' && !isDataStale && !connectionError
+                  ? 'bg-green-400 animate-[pulse_2s_infinite]'
+                  : 'bg-red-500'
+              ]"
+            ></div>
+            <span v-if="connectionError" class="text-sm">Error</span>
+            <span v-else-if="isDataStale" class="text-sm">Stale</span>
+            <span v-else class="text-sm">{{ wsStatus }}</span>
+          </div>
         </div>
-      </div>
 
-      <!-- 2-minute slider with highlight of 10s range -->
-      <div class="range-slider-2min">
-        <div class="range-labels-2min">
-          <span>${{ formatNumber(minPrice2Min, 'price') }}</span>
-          <span>${{ formatNumber(maxPrice2Min, 'price') }}</span>
+        <!-- 2-minute slider with a 10s highlighted range -->
+        <div>
+          <div class="flex justify-between text-xs text-slate-300 mb-1">
+            <span>${{ formatNumber(minPrice2Min, 'price') }}</span>
+            <span>${{ formatNumber(maxPrice2Min, 'price') }}</span>
+          </div>
+          <div class="relative h-2 bg-slate-600 rounded overflow-hidden">
+            <!-- 10s range highlight -->
+            <div
+              class="absolute top-0 left-0 h-full transition-all duration-200"
+              :style="[tenSecRangeStyle2Min, { backgroundColor: tenSecTrendColor }]"
+            ></div>
+            <!-- Current price marker (10s avg) -->
+            <div
+              class="absolute top-[-4px] w-[2px] h-[16px] bg-white transition-all duration-200"
+              :style="currentPriceMarkerStyle"
+            ></div>
+          </div>
         </div>
-        <div class="range-track-2min">
-          <div
-            class="range-10s-2min"
-            :style="[tenSecRangeStyle2Min, { backgroundColor: tenSecTrendColor }]"
-          ></div>
 
-          <!-- Marker showing 10s average price within 2m range -->
+        <!-- 10s price + diff vs. 30s -->
+        <div class="text-center">
           <div
-            class="current-price-marker"
-            :style="currentPriceMarkerStyle"
-          ></div>
+            class="inline-block text-2xl font-bold"
+            :class="price10SecDiff30Sec >= 0 ? 'text-green-400' : 'text-red-400'"
+          >
+            ${{ formatNumber(price10Sec, 'price') }}
+            <span class="ml-2 text-base">
+              {{ signOf(price10SecDiff30Sec) }}
+              {{ formatNumber(Math.abs(price10SecDiff30Sec), 'diff') }}%
+            </span>
+          </div>
         </div>
-      </div>
 
-      <!-- 10s avg price and diff vs 30s -->
-      <div class="current-price-container">
-        <div
-          class="current-price"
-          :class="price10SecDiff30Sec >= 0 ? 'bull' : 'bear'"
-        >
-          ${{ formatNumber(price10Sec, 'price') }}
-          <span class="price-diff">
-            {{ signOf(price10SecDiff30Sec) }}
-            {{ formatNumber(Math.abs(price10SecDiff30Sec), 'diff') }}%
+        <!-- Trades count (10s) with center-based difference bar -->
+        <div class="flex items-center justify-around">
+          <!-- Buy trades -->
+          <div class="flex flex-col items-center bg-white/5 px-3 py-2 rounded">
+            <div class="text-xl font-semibold text-green-400">
+              {{ buyTradesCount10s }}
+            </div>
+            <div class="text-xs text-slate-300">Buy Trades</div>
+          </div>
+
+          <!-- Diff bar -->
+          <div v-if="(buyTradesCount10s + sellTradesCount10s) > 0" class="flex flex-col items-center">
+            <div class="relative w-16 h-2 bg-slate-600 rounded-full mb-1">
+              <div
+                class="absolute h-full rounded-full transition-all duration-300"
+                :style="tradeDiffStyle"
+              ></div>
+            </div>
+            <div class="text-sm font-medium">
+              <span v-if="tradeDiff > 0" class="text-green-400">+{{ tradeDiff }}</span>
+              <span v-else-if="tradeDiff < 0" class="text-red-400">{{ tradeDiff }}</span>
+              <span v-else>0</span>
+            </div>
+          </div>
+
+          <!-- Sell trades -->
+          <div class="flex flex-col items-center bg-white/5 px-3 py-2 rounded">
+            <div class="text-xl font-semibold text-red-400">
+              {{ sellTradesCount10s }}
+            </div>
+            <div class="text-xs text-slate-300">Sell Trades</div>
+          </div>
+        </div>
+      </div><!-- /Global Trend -->
+
+      <!-- 30s block -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow space-y-4 animate-fade-in">
+        <div class="flex items-center justify-between text-sky-400 font-semibold">
+          <span>Volume Balance Last 30s</span>
+          <!-- Show progress only if <100% -->
+          <span
+            v-if="timeFrameCompleteness.thirty < 100"
+            class="text-sm opacity-70"
+          >
+            ({{ Math.floor(timeFrameCompleteness.thirty) }}%)
           </span>
         </div>
-      </div>
 
-      <!-- 10s Buy/Sell count with center-based diff bar -->
-      <div class="trades-count-container diff-10s-container">
-        <div class="trades-count buy">
-          <div class="count">{{ buyTradesCount10s }}</div>
-          <div class="label">Buy Trades</div>
+        <!-- Avg Price -->
+        <div class="text-center">
+          <div class="text-xl font-semibold">Avg: ${{ formatNumber(price30Sec, 'price') }}</div>
         </div>
 
-        <div
-          class="trade-diff"
-          v-if="(buyTradesCount10s + sellTradesCount10s) > 0"
-        >
-          <div class="trade-diff-bar">
-            <div class="trade-diff-fill" :style="tradeDiffStyle"></div>
+        <!-- Price Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Price Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="priceDiffStyle30Sec"
+            ></div>
+            <div class="absolute -top-[2px] w-[4px] h-[14px] bg-sky-400 rounded left-1/2 -translate-x-1/2"></div>
           </div>
-          <div class="trade-diff-result">
-            <span v-if="tradeDiff > 0" class="bull">
-              +{{ tradeDiff }}
-            </span>
-            <span v-else-if="tradeDiff < 0" class="bear">
-              {{ tradeDiff }}
-            </span>
-            <span v-else>0</span>
-          </div>
-        </div>
-
-        <div class="trades-count sell">
-          <div class="count">{{ sellTradesCount10s }}</div>
-          <div class="label">Sell Trades</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 30-second block -->
-    <div class="card">
-      <div class="title">
-        <span>Volume Balance Last 30s</span>
-        <span class="status-percent" v-if="timeFrameCompleteness.thirty < 100">
-          ({{ Math.floor(timeFrameCompleteness.thirty) }}%)
-        </span>
-      </div>
-
-      <div class="price-info">
-        <div class="main-price">
-          Avg: ${{ formatNumber(price30Sec, 'price') }}
-        </div>
-      </div>
-
-      <!-- Price Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Price Diff:</div>
-        <div class="metric-bar">
-          <div class="price-diff-bar center-bar">
-            <div class="trade-diff-fill" :style="priceDiffStyle30Sec"></div>
-            <div class="price-diff-marker"></div>
+          <div
+            :class="[
+              'text-right text-sm',
+              priceDiff30Sec.value > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ priceDiff30Sec.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff30Sec.value, 'diff') }}%
           </div>
         </div>
-        <div class="metric-value" :class="priceDiff30Sec.value > 0 ? 'bull' : 'bear'">
-          {{ priceDiff30Sec.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff30Sec.value, 'diff') }}%
-        </div>
-      </div>
 
-      <!-- Volume Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Vol Diff:</div>
-        <div class="metric-bar">
-          <div class="volume-bar-small center-bar">
-            <div class="trade-diff-fill" :style="volumeBarStyle30Sec"></div>
+        <!-- Volume Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Vol Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="volumeBarStyle30Sec"
+            ></div>
+          </div>
+          <div
+            :class="[
+              'text-right text-sm',
+              volumeBarDiff30Sec > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ volumeBarDiff30Sec > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff30Sec, 'diff') }}%
           </div>
         </div>
-        <div class="metric-value" :class="volumeBarDiff30Sec > 0 ? 'bull' : 'bear'">
-          {{ volumeBarDiff30Sec > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff30Sec, 'diff') }}%
-        </div>
-      </div>
 
-      <div class="volume-stats">
-        <div class="stat-item">
-          <div class="value bull">{{ formatNumber(buyVol30Sec, 'volume') }}</div>
-          <div class="label">Buy Vol</div>
-        </div>
-        <div class="volume-diff">
-          <div :class="['value', buyVol30Sec > sellVol30Sec ? 'bull' : 'bear']">
-            {{ formatNumber(volumeDiff30Sec.value, 'volume') }}
-            <span class="diff-arrow">{{ volumeDiff30Sec.sign > 0 ? '↑' : '↓' }}</span>
+        <!-- BuyVol, Diff, SellVol -->
+        <div class="grid grid-cols-3 gap-4 pt-2">
+          <div class="text-center">
+            <div class="text-xl font-semibold text-green-400">
+              {{ formatNumber(buyVol30Sec, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Buy Vol</div>
           </div>
-          <div class="label">Diff</div>
-        </div>
-        <div class="stat-item">
-          <div class="value bear">{{ formatNumber(sellVol30Sec, 'volume') }}</div>
-          <div class="label">Sell Vol</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 2-minute block -->
-    <div class="card">
-      <div class="title">
-        <span>Volume Balance Last 2m</span>
-        <span class="status-percent" v-if="timeFrameCompleteness.twoMin < 100">
-          ({{ Math.floor(timeFrameCompleteness.twoMin) }}%)
-        </span>
-      </div>
-
-      <div class="price-info">
-        <div class="main-price">
-          Avg: ${{ formatNumber(price2Min, 'price') }}
-        </div>
-      </div>
-
-      <!-- Price Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Price Diff:</div>
-        <div class="metric-bar">
-          <div class="price-diff-bar center-bar">
-            <div class="trade-diff-fill" :style="priceDiffStyle2Min"></div>
-            <div class="price-diff-marker"></div>
-          </div>
-        </div>
-        <div class="metric-value" :class="priceDiff2Min.value > 0 ? 'bull' : 'bear'">
-          {{ priceDiff2Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff2Min.value, 'diff') }}%
-        </div>
-      </div>
-
-      <!-- Volume Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Vol Diff:</div>
-        <div class="metric-bar">
-          <div class="volume-bar-small center-bar">
-            <div class="trade-diff-fill" :style="volumeBarStyle2Min"></div>
-          </div>
-        </div>
-        <div class="metric-value" :class="volumeBarDiff2Min > 0 ? 'bull' : 'bear'">
-          {{ volumeBarDiff2Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff2Min, 'diff') }}%
-        </div>
-      </div>
-
-      <div class="volume-stats">
-        <div class="stat-item">
-          <div class="value bull">{{ formatNumber(buyVol2Min, 'volume') }}</div>
-          <div class="label">Buy Vol</div>
-        </div>
-        <div class="volume-diff">
-          <div :class="['value', buyVol2Min > sellVol2Min ? 'bull' : 'bear']">
-            {{ formatNumber(volumeDiff2Min.value, 'volume') }}
-            <span class="diff-arrow">{{ volumeDiff2Min.sign > 0 ? '↑' : '↓' }}</span>
-          </div>
-          <div class="label">Diff</div>
-        </div>
-        <div class="stat-item">
-          <div class="value bear">{{ formatNumber(sellVol2Min, 'volume') }}</div>
-          <div class="label">Sell Vol</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 5-minute block -->
-    <div class="card">
-      <div class="title">
-        <span>Volume Balance Last 5m</span>
-        <span class="status-percent" v-if="timeFrameCompleteness.fiveMin < 100">
-          ({{ Math.floor(timeFrameCompleteness.fiveMin) }}%)
-        </span>
-      </div>
-
-      <div class="price-info">
-        <div class="main-price">
-          Avg: ${{ formatNumber(price5Min, 'price') }}
-        </div>
-      </div>
-
-      <!-- Price Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Price Diff:</div>
-        <div class="metric-bar">
-          <div class="price-diff-bar center-bar">
-            <div class="trade-diff-fill" :style="priceDiffStyle5Min"></div>
-            <div class="price-diff-marker"></div>
-          </div>
-        </div>
-        <div class="metric-value" :class="priceDiff5Min.value > 0 ? 'bull' : 'bear'">
-          {{ priceDiff5Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff5Min.value, 'diff') }}%
-        </div>
-      </div>
-
-      <!-- Volume Diff row -->
-      <div class="metrics-row">
-        <div class="metric-label">Vol Diff:</div>
-        <div class="metric-bar">
-          <div class="volume-bar-small center-bar">
-            <div class="trade-diff-fill" :style="volumeBarStyle5Min"></div>
-          </div>
-        </div>
-        <div class="metric-value" :class="volumeBarDiff5Min > 0 ? 'bull' : 'bear'">
-          {{ volumeBarDiff5Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff5Min, 'diff') }}%
-        </div>
-      </div>
-
-      <div class="volume-stats">
-        <div class="stat-item">
-          <div class="value bull">{{ formatNumber(buyVol5Min, 'volume') }}</div>
-          <div class="label">Buy Vol</div>
-        </div>
-        <div class="volume-diff">
-          <div :class="['value', buyVol5Min > sellVol5Min ? 'bull' : 'bear']">
-            {{ formatNumber(volumeDiff5Min.value, 'volume') }}
-            <span class="diff-arrow">{{ volumeDiff5Min.sign > 0 ? '↑' : '↓' }}</span>
-          </div>
-          <div class="label">Diff</div>
-        </div>
-        <div class="stat-item">
-          <div class="value bear">{{ formatNumber(sellVol5Min, 'volume') }}</div>
-          <div class="label">Sell Vol</div>
-        </div>
-      </div>
-    </div>
-  </div> <!-- .top-row -->
-
-  <!-- Bottom row: Exchanges + Trades -->
-  <div class="bottom-row">
-    <!-- Exchanges list -->
-    <div class="card exchanges-card">
-      <div class="exchange-header">
-        <div class="exchange-name">Exchange</div>
-        <div class="exchange-volume">Volume</div>
-        <div class="exchange-price">Price</div>
-        <div class="timeframes">
-          <div>30s</div>
-          <div>2m</div>
-          <div>5m</div>
-        </div>
-      </div>
-
-      <div class="exchanges-list">
-        <div
-          v-for="ex in sortedExchanges5Min"
-          :key="ex.name"
-          class="exchange-row"
-        >
-          <div class="exchange-name">{{ ex.name.toUpperCase() }}</div>
-          <div class="exchange-volume">{{ formatNumber(ex.totalVol, 'volume') }}</div>
-          <div class="exchange-price">
-            ${{ formatNumber(ex.price, 'price') }}
-            <span :class="ex.diff > 0 ? 'bull' : 'bear'">
-              {{ formatDiff(ex.diff) }}
-            </span>
-          </div>
-
-          <div class="timeframes">
-            <!-- 30s -->
-            <div class="timeframe-cell">
-              <div class="bar-background">
-                <div
-                  class="bar-fill"
-                  :style="{ width: exComputed(ex.name, 30).buyPercent + '%' }"
-                  :class="exComputed(ex.name, 30).buyPercent > 50 ? 'bull-bg' : 'bear-bg'"
-                ></div>
-              </div>
-              <span class="percent-value">
-                {{ formatNumber(exComputed(ex.name, 30).buyPercent) }}%
+          <div class="text-center">
+            <div
+              :class="[
+                'text-sm font-bold',
+                buyVol30Sec > sellVol30Sec ? 'text-green-400' : 'text-red-400'
+              ]"
+            >
+              {{ formatNumber(volumeDiff30Sec.value, 'volumeShort') }}
+              <span>
+                {{ volumeDiff30Sec.sign > 0 ? '↑' : '↓' }}
               </span>
             </div>
-            <!-- 2m -->
-            <div class="timeframe-cell">
-              <div class="bar-background">
-                <div
-                  class="bar-fill"
-                  :style="{ width: exComputed(ex.name, 120).buyPercent + '%' }"
-                  :class="exComputed(ex.name, 120).buyPercent > 50 ? 'bull-bg' : 'bear-bg'"
-                ></div>
-              </div>
-              <span class="percent-value">
-                {{ formatNumber(exComputed(ex.name, 120).buyPercent) }}%
+            <div class="text-xs text-slate-300">Diff</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-semibold text-red-400">
+              {{ formatNumber(sellVol30Sec, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Sell Vol</div>
+          </div>
+        </div>
+      </div><!-- /30s block -->
+
+      <!-- 2m block -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow space-y-4 animate-fade-in">
+        <div class="flex items-center justify-between text-sky-400 font-semibold">
+          <span>Volume Balance Last 2m</span>
+          <span
+            v-if="timeFrameCompleteness.twoMin < 100"
+            class="text-sm opacity-70"
+          >
+            ({{ Math.floor(timeFrameCompleteness.twoMin) }}%)
+          </span>
+        </div>
+
+        <div class="text-center">
+          <div class="text-xl font-semibold">Avg: ${{ formatNumber(price2Min, 'price') }}</div>
+        </div>
+
+        <!-- Price Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Price Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="priceDiffStyle2Min"
+            ></div>
+            <div class="absolute -top-[2px] w-[4px] h-[14px] bg-sky-400 rounded left-1/2 -translate-x-1/2"></div>
+          </div>
+          <div
+            :class="[
+              'text-right text-sm',
+              priceDiff2Min.value > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ priceDiff2Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff2Min.value, 'diff') }}%
+          </div>
+        </div>
+
+        <!-- Volume Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Vol Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="volumeBarStyle2Min"
+            ></div>
+          </div>
+          <div
+            :class="[
+              'text-right text-sm',
+              volumeBarDiff2Min > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ volumeBarDiff2Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff2Min, 'diff') }}%
+          </div>
+        </div>
+
+        <!-- Buy/Sell Vol + Diff -->
+        <div class="grid grid-cols-3 gap-4 pt-2">
+          <div class="text-center">
+            <div class="text-xl font-semibold text-green-400">
+              {{ formatNumber(buyVol2Min, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Buy Vol</div>
+          </div>
+          <div class="text-center">
+            <div
+              :class="[
+                'text-sm font-bold',
+                buyVol2Min > sellVol2Min ? 'text-green-400' : 'text-red-400'
+              ]"
+            >
+              {{ formatNumber(volumeDiff2Min.value, 'volumeShort') }}
+              <span>{{ volumeDiff2Min.sign > 0 ? '↑' : '↓' }}</span>
+            </div>
+            <div class="text-xs text-slate-300">Diff</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-semibold text-red-400">
+              {{ formatNumber(sellVol2Min, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Sell Vol</div>
+          </div>
+        </div>
+      </div><!-- /2m block -->
+
+      <!-- 5m block -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow space-y-4 animate-fade-in">
+        <div class="flex items-center justify-between text-sky-400 font-semibold">
+          <span>Volume Balance Last 5m</span>
+          <span
+            v-if="timeFrameCompleteness.fiveMin < 100"
+            class="text-sm opacity-70"
+          >
+            ({{ Math.floor(timeFrameCompleteness.fiveMin) }}%)
+          </span>
+        </div>
+
+        <div class="text-center">
+          <div class="text-xl font-semibold">Avg: ${{ formatNumber(price5Min, 'price') }}</div>
+        </div>
+
+        <!-- Price Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Price Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="priceDiffStyle5Min"
+            ></div>
+            <div class="absolute -top-[2px] w-[4px] h-[14px] bg-sky-400 rounded left-1/2 -translate-x-1/2"></div>
+          </div>
+          <div
+            :class="[
+              'text-right text-sm',
+              priceDiff5Min.value > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ priceDiff5Min.value > 0 ? '+' : '' }}{{ formatNumber(priceDiff5Min.value, 'diff') }}%
+          </div>
+        </div>
+
+        <!-- Volume Diff row -->
+        <div class="grid grid-cols-[80px_minmax(0,1fr)_60px] items-center gap-2">
+          <div class="text-right text-xs text-slate-300">Vol Diff:</div>
+          <div class="relative h-2 bg-slate-600 rounded-full">
+            <div
+              class="absolute h-full rounded-full transition-all duration-300"
+              :style="volumeBarStyle5Min"
+            ></div>
+          </div>
+          <div
+            :class="[
+              'text-right text-sm',
+              volumeBarDiff5Min > 0 ? 'text-green-400' : 'text-red-400'
+            ]"
+          >
+            {{ volumeBarDiff5Min > 0 ? '+' : '' }}{{ formatNumber(volumeBarDiff5Min, 'diff') }}%
+          </div>
+        </div>
+
+        <!-- Buy/Sell Vol + Diff -->
+        <div class="grid grid-cols-3 gap-4 pt-2">
+          <div class="text-center">
+            <div class="text-xl font-semibold text-green-400">
+              {{ formatNumber(buyVol5Min, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Buy Vol</div>
+          </div>
+          <div class="text-center">
+            <div
+              :class="[
+                'text-sm font-bold',
+                buyVol5Min > sellVol5Min ? 'text-green-400' : 'text-red-400'
+              ]"
+            >
+              {{ formatNumber(volumeDiff5Min.value, 'volumeShort') }}
+              <span>{{ volumeDiff5Min.sign > 0 ? '↑' : '↓' }}</span>
+            </div>
+            <div class="text-xs text-slate-300">Diff</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-semibold text-red-400">
+              {{ formatNumber(sellVol5Min, 'volumeShort') }}
+            </div>
+            <div class="text-xs text-slate-300">Sell Vol</div>
+          </div>
+        </div>
+      </div><!-- /5m block -->
+    </div><!-- /top-row -->
+
+    <!-- Bottom row: Exchanges + Trades -->
+    <div class="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4">
+
+      <!-- Exchanges list (5m) -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow flex flex-col space-y-4 animate-fade-in">
+        <div class="grid grid-cols-[1.5fr_1fr_1.5fr_3fr] gap-4 pb-2 border-b border-slate-700 text-sky-400 text-sm font-semibold">
+          <div>Exchange</div>
+          <div>Volume</div>
+          <div>Price</div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>30s</div>
+            <div>2m</div>
+            <div>5m</div>
+          </div>
+        </div>
+        <div class="overflow-auto pr-2">
+          <div
+            v-for="ex in sortedExchanges5Min"
+            :key="ex.name"
+            class="grid grid-cols-[1.5fr_1fr_1.5fr_3fr] gap-4 mb-2 p-2 rounded bg-white/5 hover:bg-white/10 transition-colors animate-fade-in"
+          >
+            <div class="font-medium">{{ ex.name.toUpperCase() }}</div>
+            <!-- 1 decimal volume for exchanges -->
+            <div>{{ formatNumber(ex.totalVol, 'volumeShort') }}</div>
+
+            <div>
+              ${{ formatNumber(ex.price, 'price') }}
+              <span :class="ex.diff > 0 ? 'text-green-400' : 'text-red-400'">
+                {{ formatDiff(ex.diff) }}
               </span>
             </div>
-            <!-- 5m -->
-            <div class="timeframe-cell">
-              <div class="bar-background">
-                <div
-                  class="bar-fill"
-                  :style="{ width: exComputed(ex.name, 300).buyPercent + '%' }"
-                  :class="exComputed(ex.name, 300).buyPercent > 50 ? 'bull-bg' : 'bear-bg'"
-                ></div>
+            <div class="grid grid-cols-3 gap-2">
+              <!-- 30s -->
+              <div class="flex flex-col items-center text-xs text-slate-300">
+                <div class="relative h-2 w-full bg-slate-600 rounded mb-1">
+                  <div
+                    class="absolute h-full rounded transition-all duration-300"
+                    :class="exComputed(ex.name, 30).buyPercent > 50 ? 'bg-green-400' : 'bg-red-400'"
+                    :style="{ width: exComputed(ex.name, 30).buyPercent + '%' }"
+                  ></div>
+                </div>
+                <span>{{ formatNumber(exComputed(ex.name, 30).buyPercent) }}%</span>
               </div>
-              <span class="percent-value">
-                {{ formatNumber(exComputed(ex.name, 300).buyPercent) }}%
-              </span>
+              <!-- 2m -->
+              <div class="flex flex-col items-center text-xs text-slate-300">
+                <div class="relative h-2 w-full bg-slate-600 rounded mb-1">
+                  <div
+                    class="absolute h-full rounded transition-all duration-300"
+                    :class="exComputed(ex.name, 120).buyPercent > 50 ? 'bg-green-400' : 'bg-red-400'"
+                    :style="{ width: exComputed(ex.name, 120).buyPercent + '%' }"
+                  ></div>
+                </div>
+                <span>{{ formatNumber(exComputed(ex.name, 120).buyPercent) }}%</span>
+              </div>
+              <!-- 5m -->
+              <div class="flex flex-col items-center text-xs text-slate-300">
+                <div class="relative h-2 w-full bg-slate-600 rounded mb-1">
+                  <div
+                    class="absolute h-full rounded transition-all duration-300"
+                    :class="exComputed(ex.name, 300).buyPercent > 50 ? 'bg-green-400' : 'bg-red-400'"
+                    :style="{ width: exComputed(ex.name, 300).buyPercent + '%' }"
+                  ></div>
+                </div>
+                <span>{{ formatNumber(exComputed(ex.name, 300).buyPercent) }}%</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </div><!-- /Exchanges list -->
 
-    <!-- Recent Trades -->
-    <div class="card trades-card">
-      <div class="trades-cols-container">
-        <!-- Buy trades column -->
-        <div class="trades-col">
-          <div class="trades-header">
-            <div>Buy Vol</div>
-            <div>Price</div>
+      <!-- Recent Trades (buy/sell) -->
+      <div class="rounded-lg bg-slate-800 p-4 shadow flex flex-col space-y-4 animate-fade-in">
+        <div class="grid grid-cols-2 gap-4 text-sky-400 text-sm font-semibold border-b border-slate-700 pb-2 px-2">
+          <div class="flex justify-between">
+            <span>Buy Vol</span>
+            <span>Price</span>
           </div>
-          <div class="trades-list">
+          <div class="flex justify-between">
+            <span>Sell Vol</span>
+            <span>Price</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4 flex-1 min-h-0">
+          <!-- Buy trades list -->
+          <div class="overflow-auto pr-1">
             <div
               v-for="(trade, idx) in buyTradesLimited"
               :key="idx"
-              :class="['trade-row', getTradeSize(trade.volume, maxVol5Min)]"
+              :class="[
+                // smaller font for trades
+                'grid grid-cols-2 relative mb-1 p-2 rounded transition-colors animate-fade-in text-xs',
+                getTradeSize(trade.volume, maxVol5Min)
+              ]"
               :style="dynamicStyle(trade)"
             >
+              <!-- 3 decimals for trades -->
               <div>{{ formatNumber(trade.volume, 'volume') }}</div>
-              <div>${{ formatNumber(trade.price, 'price') }}</div>
+              <div class="text-right">${{ formatNumber(trade.price, 'price') }}</div>
               <div
-                class="volume-indicator"
+                class="absolute bottom-0 left-0 h-[2px] bg-sky-400/50 transition-all"
                 :style="{ width: (maxVol5Min ? (trade.volume / maxVol5Min * 100) : 0) + '%' }"
               ></div>
             </div>
           </div>
-        </div>
 
-        <!-- Sell trades column -->
-        <div class="trades-col">
-          <div class="trades-header">
-            <div>Sell Vol</div>
-            <div>Price</div>
-          </div>
-          <div class="trades-list">
+          <!-- Sell trades list -->
+          <div class="overflow-auto pl-1">
             <div
               v-for="(trade, idx) in sellTradesLimited"
               :key="idx"
-              :class="['trade-row', getTradeSize(trade.volume, maxVol5Min)]"
+              :class="[
+                // smaller font here as well
+                'grid grid-cols-2 relative mb-1 p-2 rounded transition-colors animate-fade-in text-xs',
+                getTradeSize(trade.volume, maxVol5Min)
+              ]"
               :style="dynamicStyle(trade)"
             >
               <div>{{ formatNumber(trade.volume, 'volume') }}</div>
-              <div>${{ formatNumber(trade.price, 'price') }}</div>
+              <div class="text-right">${{ formatNumber(trade.price, 'price') }}</div>
               <div
-                class="volume-indicator"
+                class="absolute bottom-0 left-0 h-[2px] bg-sky-400/50 transition-all"
                 :style="{ width: (maxVol5Min ? (trade.volume / maxVol5Min * 100) : 0) + '%' }"
               ></div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div> <!-- .bottom-row -->
-</div> <!-- #app -->
+      </div><!-- /trades-card -->
+    </div><!-- /bottom-row -->
 
-<!-- Scripts -->
-<script src="src/js/services/websocket.js"></script>
-<script src="src/js/main.js"></script>
+  </div><!-- /#app -->
+
+  <!-- Scripts -->
+  <script src="src/js/services/websocket.js"></script>
+  <script src="src/js/main.js"></script>
 </body>
 </html>
